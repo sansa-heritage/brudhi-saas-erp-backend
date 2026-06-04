@@ -280,117 +280,194 @@ class DatabaseManager {
     }
   }
 
+  // async getTenantDatabaseConnection(tenantId) {
+  //   try {
+  //     console.log(
+  //       `Getting tenant database connection for tenant ID: ${tenantId}`,
+  //     );
+
+  //     // Create direct connection to main database
+  //     const mainConnection = await mysql.createConnection({
+  //       host: config.MAIN_DB.HOST,
+  //       port: config.MAIN_DB.PORT,
+  //       user: config.MAIN_DB.USER,
+  //       password: config.MAIN_DB.PASSWORD,
+  //       database: config.MAIN_DB.NAME,
+  //     });
+
+  //     try {
+  //       // Use query() instead of execute() to avoid parameter issues
+  //       const [rows] = await mainConnection.query(
+  //         `SELECT id, name, database_name, database_host, database_port, 
+  //                       database_user, database_password, status
+  //                FROM tenants 
+  //                WHERE id = ? AND status = 'active'`,
+  //         [tenantId],
+  //       );
+
+  //       console.log("Query result rows:", rows);
+  //       console.log("Rows length:", rows.length);
+
+  //       if (rows.length === 0) {
+  //         console.error(`Tenant not found or inactive: ${tenantId}`);
+  //         throw new Error("Tenant not found or inactive");
+  //       }
+
+  //       const tenantInfo = rows[0];
+  //       console.log("Tenant data retrieved:", {
+  //         id: tenantInfo.id,
+  //         name: tenantInfo.name,
+  //         database_name: tenantInfo.database_name,
+  //         database_host: tenantInfo.database_host,
+  //         database_port: tenantInfo.database_port,
+  //         database_user: tenantInfo.database_user,
+  //         has_password: !!tenantInfo.database_password,
+  //       });
+
+  //       if (!tenantInfo.database_name) {
+  //         console.error("Missing database_name for tenant");
+  //         throw new Error("Tenant database not configured");
+  //       }
+
+  //       console.log(`\nConnecting to tenant database:`);
+  //       console.log(`  Database: ${tenantInfo.database_name}`);
+  //       console.log(`  Host: ${tenantInfo.database_host}`);
+  //       console.log(`  Port: ${tenantInfo.database_port}`);
+  //       console.log(`  User: ${tenantInfo.database_user}`);
+
+  //       const pool = mysql.createPool({
+  //         host: tenantInfo.database_host,
+  //         port: parseInt(tenantInfo.database_port),
+  //         user: tenantInfo.database_user,
+  //         password: tenantInfo.database_password,
+  //         database: tenantInfo.database_name,
+  //         waitForConnections: true,
+  //         connectionLimit: 5,
+  //         queueLimit: 0,
+  //         connectTimeout: 10000,
+  //       });
+
+  //       const testConn = await pool.getConnection();
+  //       console.log(
+  //         `✓ Successfully connected to tenant database: ${tenantInfo.database_name}`,
+  //       );
+  //       testConn.release();
+
+  //       return pool;
+  //     } finally {
+  //       await mainConnection.end();
+  //     }
+  //   } catch (error) {
+  //     console.error("Error getting tenant database connection:", error.message);
+  //     throw new Error(`Failed to connect to tenant database: ${error.message}`);
+  //   }
+  // }
+  // async deleteTenantDatabase(tenantId) {
+  //   const tenant = await this.mainPool.query(
+  //     "SELECT database_name, database_user FROM tenants WHERE id = ?",
+  //     [tenantId],
+  //   );
+
+  //   if (tenant.length === 0) {
+  //     throw new Error("Tenant not found");
+  //   }
+
+  //   const { database_name, database_user } = tenant[0];
+  //   const connection = await this.getRootConnection();
+
+  //   try {
+  //     if (database_name) {
+  //       await connection.query(`DROP DATABASE IF EXISTS \`${database_name}\``);
+  //       console.log(`✓ Dropped database: ${database_name}`);
+  //     }
+  //     if (database_user) {
+  //       await connection.query(`DROP USER IF EXISTS '${database_user}'@'%'`);
+  //       console.log(`✓ Dropped user: ${database_user}`);
+  //     }
+  //     await connection.query("FLUSH PRIVILEGES");
+  //     logger.info(`Database ${database_name} deleted for tenant ${tenantId}`);
+  //     return true;
+  //   } finally {
+  //     await connection.end();
+  //   }
+  // }
+
+
   async getTenantDatabaseConnection(tenantId) {
+    if (!tenantId) {
+        throw new Error("Tenant ID is required");
+    }
+    
     try {
-      console.log(
-        `Getting tenant database connection for tenant ID: ${tenantId}`,
-      );
+        console.log(`Getting tenant database connection for tenant ID: ${tenantId}`);
 
-      // Create direct connection to main database
-      const mainConnection = await mysql.createConnection({
-        host: config.MAIN_DB.HOST,
-        port: config.MAIN_DB.PORT,
-        user: config.MAIN_DB.USER,
-        password: config.MAIN_DB.PASSWORD,
-        database: config.MAIN_DB.NAME,
-      });
-
-      try {
-        // Use query() instead of execute() to avoid parameter issues
-        const [rows] = await mainConnection.query(
-          `SELECT id, name, database_name, database_host, database_port, 
-                        database_user, database_password, status
-                 FROM tenants 
-                 WHERE id = ? AND status = 'active'`,
-          [tenantId],
-        );
-
-        console.log("Query result rows:", rows);
-        console.log("Rows length:", rows.length);
-
-        if (rows.length === 0) {
-          console.error(`Tenant not found or inactive: ${tenantId}`);
-          throw new Error("Tenant not found or inactive");
-        }
-
-        const tenantInfo = rows[0];
-        console.log("Tenant data retrieved:", {
-          id: tenantInfo.id,
-          name: tenantInfo.name,
-          database_name: tenantInfo.database_name,
-          database_host: tenantInfo.database_host,
-          database_port: tenantInfo.database_port,
-          database_user: tenantInfo.database_user,
-          has_password: !!tenantInfo.database_password,
+        const mainConnection = await mysql.createConnection({
+            host: config.MAIN_DB.HOST,
+            port: config.MAIN_DB.PORT,
+            user: config.MAIN_DB.USER,
+            password: config.MAIN_DB.PASSWORD,
+            database: config.MAIN_DB.NAME,
         });
 
-        if (!tenantInfo.database_name) {
-          console.error("Missing database_name for tenant");
-          throw new Error("Tenant database not configured");
+        try {
+            const [rows] = await mainConnection.query(
+                `SELECT * FROM tenants WHERE id = ?`,
+                [tenantId]
+            );
+
+            if (rows.length === 0) {
+                console.error(`Tenant not found: ${tenantId}`);
+                throw new Error(`Tenant with ID ${tenantId} not found`);
+            }
+
+            const tenantInfo = rows[0];
+            
+            // Check if tenant is active
+            if (tenantInfo.status !== 'active' && tenantInfo.is_active !== 1) {
+                console.error(`Tenant is inactive: ${tenantId}`);
+                throw new Error(`Tenant ${tenantId} is inactive`);
+            }
+            
+            // If database_name is not set, create default database name
+            let databaseName = tenantInfo.database_name;
+            if (!databaseName) {
+                databaseName = `gasflow_tenant_${tenantInfo.name?.toLowerCase().replace(/[^a-z0-9]/g, '_') || `tenant_${tenantId}`}`;
+                console.log(`Using default database name: ${databaseName}`);
+            }
+            
+            const host = tenantInfo.database_host || config.MAIN_DB.HOST || 'localhost';
+            const port = tenantInfo.database_port || config.MAIN_DB.PORT || 3306;
+            const user = tenantInfo.database_user || config.MAIN_DB.USER || 'root';
+            const password = tenantInfo.database_password || config.MAIN_DB.PASSWORD || 'root';
+            
+            console.log(`Connecting to: ${host}:${port} - Database: ${databaseName}`);
+            
+            const pool = mysql.createPool({
+                host: host,
+                port: parseInt(port),
+                user: user,
+                password: password,
+                database: databaseName,
+                waitForConnections: true,
+                connectionLimit: 5,
+                queueLimit: 0,
+                connectTimeout: 10000,
+            });
+            
+            // Test connection
+            const testConn = await pool.getConnection();
+            console.log(`✓ Connected to tenant database: ${databaseName}`);
+            testConn.release();
+            
+            return pool;
+        } finally {
+            await mainConnection.end();
         }
-
-        console.log(`\nConnecting to tenant database:`);
-        console.log(`  Database: ${tenantInfo.database_name}`);
-        console.log(`  Host: ${tenantInfo.database_host}`);
-        console.log(`  Port: ${tenantInfo.database_port}`);
-        console.log(`  User: ${tenantInfo.database_user}`);
-
-        const pool = mysql.createPool({
-          host: tenantInfo.database_host,
-          port: parseInt(tenantInfo.database_port),
-          user: tenantInfo.database_user,
-          password: tenantInfo.database_password,
-          database: tenantInfo.database_name,
-          waitForConnections: true,
-          connectionLimit: 5,
-          queueLimit: 0,
-          connectTimeout: 10000,
-        });
-
-        const testConn = await pool.getConnection();
-        console.log(
-          `✓ Successfully connected to tenant database: ${tenantInfo.database_name}`,
-        );
-        testConn.release();
-
-        return pool;
-      } finally {
-        await mainConnection.end();
-      }
     } catch (error) {
-      console.error("Error getting tenant database connection:", error.message);
-      throw new Error(`Failed to connect to tenant database: ${error.message}`);
+        console.error("Error in getTenantDatabaseConnection:", error.message);
+        throw new Error(`Failed to connect to tenant database: ${error.message}`);
     }
-  }
-  async deleteTenantDatabase(tenantId) {
-    const tenant = await this.mainPool.query(
-      "SELECT database_name, database_user FROM tenants WHERE id = ?",
-      [tenantId],
-    );
-
-    if (tenant.length === 0) {
-      throw new Error("Tenant not found");
-    }
-
-    const { database_name, database_user } = tenant[0];
-    const connection = await this.getRootConnection();
-
-    try {
-      if (database_name) {
-        await connection.query(`DROP DATABASE IF EXISTS \`${database_name}\``);
-        console.log(`✓ Dropped database: ${database_name}`);
-      }
-      if (database_user) {
-        await connection.query(`DROP USER IF EXISTS '${database_user}'@'%'`);
-        console.log(`✓ Dropped user: ${database_user}`);
-      }
-      await connection.query("FLUSH PRIVILEGES");
-      logger.info(`Database ${database_name} deleted for tenant ${tenantId}`);
-      return true;
-    } finally {
-      await connection.end();
-    }
-  }
+}
 
   async deleteTenantDatabaseByCredentials(databaseName, username) {
     const connection = await this.getRootConnection();

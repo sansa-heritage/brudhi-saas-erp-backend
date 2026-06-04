@@ -1,4 +1,4 @@
-const DatabaseManager = require("../../services/database-manager.service"); // Fixed path
+const DatabaseManager = require("../../services/database-manager.service");
 
 class InventoryService {
   // =============================================
@@ -7,7 +7,6 @@ class InventoryService {
   static async generateProductCode(tenantId) {
     const db = await DatabaseManager.getTenantDatabaseConnection(tenantId);
     try {
-      // Get all existing product codes in one query
       const [existingCodes] = await db.query(
         "SELECT product_code FROM products WHERE tenant_id = ?",
         [tenantId],
@@ -18,7 +17,6 @@ class InventoryService {
       let counter = existingCodes.length + 1;
       let productCode = `PROD${String(counter).padStart(6, "0")}`;
 
-      // Keep incrementing until unique
       while (existingSet.has(productCode)) {
         counter++;
         productCode = `PROD${String(counter).padStart(6, "0")}`;
@@ -37,12 +35,12 @@ class InventoryService {
 
       const [result] = await db.query(
         `INSERT INTO products (
-                product_code, product_name, category, hsn_code, unit,
-                unit_price, purchase_price, selling_price, gst_rate,
-                min_stock_level, max_stock_level, reorder_level,
-                opening_stock, current_stock, location, brand_id,
-                tenant_id, created_by, created_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())`,
+          product_code, product_name, category, hsn_code, unit,
+          unit_price, purchase_price, selling_price, gst_rate,
+          min_stock_level, max_stock_level, reorder_level,
+          opening_stock, current_stock, location, brand_id,
+          tenant_id, created_by, created_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())`,
         [
           productCode,
           productData.product_name,
@@ -60,7 +58,7 @@ class InventoryService {
           productData.opening_stock || 0,
           productData.location || null,
           productData.brand_id || null,
-          tenantId, // Add tenant_id here
+          tenantId,
           productData.created_by || null,
         ],
       );
@@ -70,13 +68,15 @@ class InventoryService {
       await db.end();
     }
   }
+
+  // ✅ FIXED: Removed deleted_at
   static async getProductById(id, tenantId) {
     const db = await DatabaseManager.getTenantDatabaseConnection(tenantId);
     try {
       const [rows] = await db.query(
         `SELECT p.*
-                FROM products p
-                WHERE p.id = ? AND p.tenant_id = ? AND p.deleted_at IS NULL`,
+         FROM products p
+         WHERE p.id = ? AND p.tenant_id = ?`,
         [id, tenantId],
       );
       return rows[0];
@@ -85,19 +85,20 @@ class InventoryService {
     }
   }
 
+  // ✅ FIXED: Removed deleted_at
   static async getAllProducts(tenantId, filters = {}, pagination = {}) {
     const db = await DatabaseManager.getTenantDatabaseConnection(tenantId);
     try {
       let query = `
-                SELECT p.*,
-                       CASE 
-                           WHEN p.current_stock <= p.min_stock_level THEN 'LOW_STOCK'
-                           WHEN p.current_stock <= p.reorder_level THEN 'REORDER'
-                           ELSE 'OK'
-                       END as stock_status
-                FROM products p
-                WHERE p.deleted_at IS NULL AND p.tenant_id = ?
-            `;
+        SELECT p.*,
+               CASE 
+                 WHEN p.current_stock <= p.min_stock_level THEN 'LOW_STOCK'
+                 WHEN p.current_stock <= p.reorder_level THEN 'REORDER'
+                 ELSE 'OK'
+               END as stock_status
+        FROM products p
+        WHERE p.tenant_id = ?
+      `;
       const params = [tenantId];
 
       if (filters.search) {
@@ -127,7 +128,8 @@ class InventoryService {
 
       const [rows] = await db.query(query, params);
 
-      let countQuery = `SELECT COUNT(*) as total FROM products WHERE deleted_at IS NULL AND tenant_id = ?`;
+      // ✅ FIXED: Removed deleted_at from count query
+      let countQuery = `SELECT COUNT(*) as total FROM products WHERE tenant_id = ?`;
       const countParams = [tenantId];
 
       if (filters.search) {
@@ -155,13 +157,14 @@ class InventoryService {
       await db.end();
     }
   }
+
+  // ✅ FIXED: Removed deleted_at
   static async updateProduct(id, tenantId, updateData) {
     const db = await DatabaseManager.getTenantDatabaseConnection(tenantId);
     try {
       const fields = [];
       const values = [];
 
-      // Define allowed fields for update (matching createProduct structure)
       const allowedFields = [
         "product_name",
         "category",
@@ -188,9 +191,7 @@ class InventoryService {
         }
       }
 
-      // If opening_stock is updated, also update current_stock to match
       if (updateData.opening_stock !== undefined && updateData.opening_stock !== null) {
-        // Remove current_stock from fields if already added to avoid duplicate
         const currentStockIndex = fields.findIndex(f => f.startsWith('current_stock = ?'));
         if (currentStockIndex !== -1) {
           fields.splice(currentStockIndex, 1);
@@ -202,13 +203,11 @@ class InventoryService {
 
       if (fields.length === 0) return false;
 
-      // Add updated_at timestamp
       fields.push("updated_at = NOW()");
-      values.push(id);
+      values.push(id, tenantId);
 
-      const query = `UPDATE products SET ${fields.join(", ")} WHERE id = ? AND deleted_at IS NULL AND tenant_id = ?`;
-      values.push(tenantId);
-      
+      // ✅ FIXED: Removed deleted_at
+      const query = `UPDATE products SET ${fields.join(", ")} WHERE id = ? AND tenant_id = ?`;
       const [result] = await db.query(query, values);
       return result.affectedRows > 0;
     } catch (error) {
@@ -217,7 +216,7 @@ class InventoryService {
     } finally {
       await db.end();
     }
-}
+  }
 
   static async deleteProduct(tenantId, id) {
     if (!id || isNaN(id)) {
@@ -227,27 +226,23 @@ class InventoryService {
     const db = await DatabaseManager.getTenantDatabaseConnection(tenantId);
 
     try {
-      // Check if product has any stock transactions
       const [transactions] = await db.query(
-        `SELECT id FROM stock_transactions
-             WHERE product_id = ? LIMIT 1`,
+        `SELECT id FROM stock_transactions WHERE product_id = ? LIMIT 1`,
         [Number(id)],
       );
 
       if (transactions.length > 0) {
-        throw new Error(
-          "Cannot delete product with existing stock transactions",
-        );
+        throw new Error("Cannot delete product with existing stock transactions");
       }
 
-      // Hard delete - permanently remove from database
-      await db.query("DELETE FROM products WHERE id = ?", [Number(id)]);
+      await db.query("DELETE FROM products WHERE id = ? AND tenant_id = ?", [Number(id), tenantId]);
 
       return true;
     } finally {
       await db.end();
     }
   }
+
   // =============================================
   // STOCK MANAGEMENT
   // =============================================
@@ -259,7 +254,6 @@ class InventoryService {
     console.log("Quantity:", transactionData.quantity);
     const db = await DatabaseManager.getTenantDatabaseConnection(tenantId);
     try {
-      // First, get current product stock
       const [product] = await db.query(
         "SELECT current_stock FROM products WHERE id = ?",
         [transactionData.product_id],
@@ -268,25 +262,22 @@ class InventoryService {
       const currentStock = product[0]?.current_stock || 0;
       let newStock = currentStock;
 
-      // Calculate new stock based on transaction type
       if (transactionData.transaction_type === "SALE") {
         newStock = currentStock - transactionData.quantity;
       } else if (transactionData.transaction_type === "PURCHASE") {
         newStock = currentStock + transactionData.quantity;
       }
 
-      // Update product stock
       await db.query("UPDATE products SET current_stock = ? WHERE id = ?", [
         newStock,
         transactionData.product_id,
       ]);
 
-      // Insert transaction record
       const [result] = await db.query(
         `INSERT INTO stock_transactions (
-                product_id, transaction_type, quantity, previous_stock, new_stock,
-                reference_type, reference_id, remarks, created_by, created_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())`,
+          product_id, transaction_type, quantity, previous_stock, new_stock,
+          reference_type, reference_id, remarks, created_by, created_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())`,
         [
           transactionData.product_id,
           transactionData.transaction_type,
@@ -300,12 +291,7 @@ class InventoryService {
         ],
       );
 
-      // ***** IMPORTANT: Call checkAndCreateAlert to create alerts *****
-      await this.checkAndCreateAlert(
-        transactionData.product_id,
-        newStock,
-        tenantId,
-      );
+      await this.checkAndCreateAlert(transactionData.product_id, newStock, tenantId);
 
       return result.insertId;
     } finally {
@@ -316,7 +302,6 @@ class InventoryService {
   static async adjustStock(adjustmentData, tenantId) {
     const db = await DatabaseManager.getTenantDatabaseConnection(tenantId);
     try {
-      // Get current stock
       const [product] = await db.query(
         "SELECT current_stock FROM products WHERE id = ?",
         [adjustmentData.product_id],
@@ -331,18 +316,16 @@ class InventoryService {
         newStock = currentStock - adjustmentData.quantity;
       }
 
-      // Update product stock
       await db.query("UPDATE products SET current_stock = ? WHERE id = ?", [
         newStock,
         adjustmentData.product_id,
       ]);
 
-      // Insert adjustment record
       const [result] = await db.query(
         `INSERT INTO stock_adjustments (
-                adjustment_no, product_id, adjustment_type, quantity,
-                reason, previous_stock, new_stock, created_by, created_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, NOW())`,
+          adjustment_no, product_id, adjustment_type, quantity,
+          reason, previous_stock, new_stock, created_by, created_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, NOW())`,
         [
           `ADJ_${Date.now()}`,
           adjustmentData.product_id,
@@ -355,18 +338,14 @@ class InventoryService {
         ],
       );
 
-      // ***** IMPORTANT: Call checkAndCreateAlert to create alerts *****
-      await this.checkAndCreateAlert(
-        adjustmentData.product_id,
-        newStock,
-        tenantId,
-      );
+      await this.checkAndCreateAlert(adjustmentData.product_id, newStock, tenantId);
 
       return result.insertId;
     } finally {
       await db.end();
     }
   }
+
   static async getStockTransactions(productId, tenantId, pagination = {}) {
     const db = await DatabaseManager.getTenantDatabaseConnection(tenantId);
     try {
@@ -376,11 +355,11 @@ class InventoryService {
 
       const [rows] = await db.query(
         `SELECT st.*, p.product_name
-                FROM stock_transactions st
-                JOIN products p ON st.product_id = p.id
-                WHERE st.product_id = ?
-                ORDER BY st.created_at DESC
-                LIMIT ? OFFSET ?`,
+         FROM stock_transactions st
+         JOIN products p ON st.product_id = p.id
+         WHERE st.product_id = ?
+         ORDER BY st.created_at DESC
+         LIMIT ? OFFSET ?`,
         [productId, parseInt(limit), parseInt(offset)],
       );
 
@@ -410,7 +389,6 @@ class InventoryService {
   static async checkAndCreateAlert(productId, currentStock, tenantId) {
     const db = await DatabaseManager.getTenantDatabaseConnection(tenantId);
     try {
-      // Get product details
       const [product] = await db.query(
         "SELECT min_stock_level, reorder_level, product_name FROM products WHERE id = ?",
         [productId],
@@ -422,9 +400,7 @@ class InventoryService {
       const reorderLevel = product[0].reorder_level || 0;
       const productName = product[0].product_name;
 
-      // Check for LOW STOCK alert
       if (currentStock <= minStockLevel && minStockLevel > 0) {
-        // Check if alert already exists - CHANGE is_active to status
         const [existing] = await db.query(
           "SELECT id FROM stock_alerts WHERE product_id = ? AND alert_type = 'LOW_STOCK' AND status = 'ACTIVE'",
           [productId],
@@ -433,27 +409,20 @@ class InventoryService {
         if (existing.length === 0) {
           await db.query(
             `INSERT INTO stock_alerts (product_id, alert_type, threshold_value, current_value, status, created_at)
-                     VALUES (?, 'LOW_STOCK', ?, ?, 'ACTIVE', NOW())`,
+             VALUES (?, 'LOW_STOCK', ?, ?, 'ACTIVE', NOW())`,
             [productId, minStockLevel, currentStock],
           );
           console.log(`Low stock alert created for ${productName}`);
         } else {
-          // Update existing alert
           await db.query(
             `UPDATE stock_alerts SET current_value = ?, updated_at = NOW() 
-                     WHERE product_id = ? AND alert_type = 'LOW_STOCK' AND status = 'ACTIVE'`,
+             WHERE product_id = ? AND alert_type = 'LOW_STOCK' AND status = 'ACTIVE'`,
             [currentStock, productId],
           );
         }
       }
 
-      // Check for REORDER alert
-      if (
-        currentStock <= reorderLevel &&
-        currentStock > minStockLevel &&
-        reorderLevel > 0
-      ) {
-        // Check if alert already exists - CHANGE is_active to status
+      if (currentStock <= reorderLevel && currentStock > minStockLevel && reorderLevel > 0) {
         const [existing] = await db.query(
           "SELECT id FROM stock_alerts WHERE product_id = ? AND alert_type = 'REORDER' AND status = 'ACTIVE'",
           [productId],
@@ -462,25 +431,23 @@ class InventoryService {
         if (existing.length === 0) {
           await db.query(
             `INSERT INTO stock_alerts (product_id, alert_type, threshold_value, current_value, status, created_at)
-                     VALUES (?, 'REORDER', ?, ?, 'ACTIVE', NOW())`,
+             VALUES (?, 'REORDER', ?, ?, 'ACTIVE', NOW())`,
             [productId, reorderLevel, currentStock],
           );
           console.log(`Reorder alert created for ${productName}`);
         } else {
-          // Update existing alert
           await db.query(
             `UPDATE stock_alerts SET current_value = ?, updated_at = NOW() 
-                     WHERE product_id = ? AND alert_type = 'REORDER' AND status = 'ACTIVE'`,
+             WHERE product_id = ? AND alert_type = 'REORDER' AND status = 'ACTIVE'`,
             [currentStock, productId],
           );
         }
       }
 
-      // Auto-resolve alerts if stock is restored - CHANGE is_active to status
       if (currentStock > reorderLevel && reorderLevel > 0) {
         await db.query(
           `UPDATE stock_alerts SET status = 'RESOLVED', resolved_at = NOW()
-                 WHERE product_id = ? AND alert_type = 'REORDER' AND status = 'ACTIVE'`,
+           WHERE product_id = ? AND alert_type = 'REORDER' AND status = 'ACTIVE'`,
           [productId],
         );
       }
@@ -488,7 +455,7 @@ class InventoryService {
       if (currentStock > minStockLevel && minStockLevel > 0) {
         await db.query(
           `UPDATE stock_alerts SET status = 'RESOLVED', resolved_at = NOW()
-                 WHERE product_id = ? AND alert_type = 'LOW_STOCK' AND status = 'ACTIVE'`,
+           WHERE product_id = ? AND alert_type = 'LOW_STOCK' AND status = 'ACTIVE'`,
           [productId],
         );
       }
@@ -535,10 +502,10 @@ class InventoryService {
     try {
       const [result] = await db.query(
         `INSERT INTO stock_transfers (
-                    transfer_no, from_location, to_location, product_id,
-                    quantity, transfer_date, vehicle_no, transporter_name,
-                    delivery_person, notes, created_by
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          transfer_no, from_location, to_location, product_id,
+          quantity, transfer_date, vehicle_no, transporter_name,
+          delivery_person, notes, created_by
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         [
           `TRF_${Date.now()}`,
           transferData.from_location,
@@ -576,30 +543,31 @@ class InventoryService {
   // INVENTORY SUMMARY & REPORTS
   // =============================================
 
+  // ✅ FIXED: Removed deleted_at
   static async getInventorySummary(tenantId) {
     const db = await DatabaseManager.getTenantDatabaseConnection(tenantId);
     try {
       const [summary] = await db.query(`
-                SELECT 
-                    COUNT(*) as total_products,
-                    SUM(current_stock) as total_quantity,
-                    SUM(current_stock * unit_price) as total_value,
-                    SUM(CASE WHEN current_stock <= min_stock_level THEN 1 ELSE 0 END) as low_stock_count,
-                    SUM(CASE WHEN current_stock <= reorder_level AND current_stock > min_stock_level THEN 1 ELSE 0 END) as reorder_count
-                FROM products
-                WHERE deleted_at IS NULL
-            `);
+        SELECT 
+          COUNT(*) as total_products,
+          SUM(current_stock) as total_quantity,
+          SUM(current_stock * selling_price) as total_value,
+          SUM(CASE WHEN current_stock <= min_stock_level THEN 1 ELSE 0 END) as low_stock_count,
+          SUM(CASE WHEN current_stock <= reorder_level AND current_stock > min_stock_level THEN 1 ELSE 0 END) as reorder_count
+        FROM products
+        WHERE tenant_id = ?
+      `, [tenantId]);
 
       const [categoryWise] = await db.query(`
-                SELECT 
-                    category,
-                    COUNT(*) as product_count,
-                    SUM(current_stock) as total_quantity,
-                    SUM(current_stock * unit_price) as total_value
-                FROM products
-                WHERE deleted_at IS NULL AND category IS NOT NULL
-                GROUP BY category
-            `);
+        SELECT 
+          category,
+          COUNT(*) as product_count,
+          SUM(current_stock) as total_quantity,
+          SUM(current_stock * selling_price) as total_value
+        FROM products
+        WHERE tenant_id = ? AND category IS NOT NULL
+        GROUP BY category
+      `, [tenantId]);
 
       return {
         summary: summary[0],

@@ -42,11 +42,13 @@ const orderRoutes = require("./modules/order/order.routes");
 const documentRoutes = require("./modules/document/document.routes");
 const cylinderRoutes = require("./modules/cylinder/cylinder.routes");
 
-
 // Add after other route imports
 const superadminPlansRoutes = require("./modules/superadmin-plans/superadmin-plans.routes");
 
-// Add after other route declarations
+// ==================== COMPANY SETTING ROUTE ====================
+const companySettingRoutes = require(
+  "./modules/companysetting/companysetting.routes"
+);
 
 const app = express();
 
@@ -243,6 +245,8 @@ app.use("/api/documents", documentRoutes);
 app.use("/api/superadmin/plans", superadminPlansRoutes);
 app.use("/api/cylinders", cylinderRoutes);
 
+// ==================== COMPANY SETTINGS ====================
+app.use("/api/company-settings", companySettingRoutes);
 
 // ==================== API DOCUMENTATION ====================
 
@@ -298,18 +302,15 @@ app.get("/api/docs", (req, res) => {
         "GET /api/expenses, POST /api/expenses, PUT /api/expenses/:id, DELETE /api/expenses/:id",
       reports:
         "GET /api/reports/sales, GET /api/reports/stock, GET /api/reports/financial",
-      dashboard: "GET /api/dashboard/stats, GET /api/dashboard/charts",
+      dashboard: "GET /api/dashboard/stats, GET /api/dashboard/charts, GET /api/dashboard/sales-data, GET /api/dashboard/recent-invoices, GET /api/dashboard/customers, GET /api/dashboard/expenses",
       staff:
         "GET /api/staff, POST /api/staff, PUT /api/staff/:id, DELETE /api/staff/:id, GET /api/staff/:id/activity, PATCH /api/staff/:id/reset-password",
       inventory:
         "GET /api/inventory, POST /api/inventory, PUT /api/inventory/:id, DELETE /api/inventory/:id, POST /api/inventory/stock/transactions, GET /api/inventory/stock/transactions/:productId, POST /api/inventory/stock/adjust, GET /api/inventory/alerts, PUT /api/inventory/alerts/:id/resolve, POST /api/inventory/transfers, PUT /api/inventory/transfers/:id/complete, GET /api/inventory/summary",
-
       orders:
         "GET /api/orders, POST /api/orders, GET /api/orders/:id, PUT /api/orders/:id/status, PUT /api/orders/:id/payment, POST /api/orders/:id/cancel, DELETE /api/orders/:id",
-
       documents:
         "POST /api/documents, GET /api/documents, GET /api/documents/:id, GET /api/documents/:id/download, GET /api/documents/entity/:entityType/:entityId, PUT /api/documents/:id, DELETE /api/documents/:id, GET /api/documents/categories/:entityType, GET /api/documents/statistics",
-
       subscriptions:
         "POST /api/subscriptions, GET /api/subscriptions, GET /api/subscriptions/:id, GET /api/subscriptions/statistics, GET /api/subscriptions/tenant, POST /api/subscriptions/:id/renew, POST /api/subscriptions/:id/cancel, POST /api/subscriptions/:id/payments, POST /api/subscriptions/update-expired",
     },
