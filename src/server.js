@@ -4,7 +4,7 @@ const logger = require("./config/logger");
 const db = require("./config/db");
 const DatabaseManager = require("./services/database-manager.service");
 
-const PORT = config.PORT || 5000;
+const PORT = config.PORT || 3000;
 let server = null;
 
 // ==================== PROCESS HANDLERS ====================
