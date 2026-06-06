@@ -121,7 +121,7 @@ const startServer = async () => {
     logger.info("✓ Tenant database template loaded");
 
     // Start HTTP server
-    server = app.listen(PORT,'0.0.0.0' () => {
+    server = app.listen(PORT,'0.0.0.0', () => {
       logger.info(`✓ Server started successfully`);
       logger.info(`========================================`);
       logger.info(`Environment: ${config.NODE_ENV}`);
