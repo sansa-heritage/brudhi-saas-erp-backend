@@ -358,7 +358,7 @@ class AuthService {
 
         try {
           const result = await tenantDb.query(
-            "SELECT id, name, email, role, mobile, status, profile_image, last_login, created_at FROM users WHERE id = ?",
+            "SELECT id, name, email, mobile, role, status, profile_image, last_login, created_at FROM users WHERE id = ?",
             [parsedUserId],
           );
 
@@ -368,6 +368,13 @@ class AuthService {
           if (!users || users.length === 0) {
             throw new Error("User not found");
           }
+
+          console.log("Profile data retrieved:", {
+            name: users[0].name,
+            email: users[0].email,
+            mobile: users[0].mobile,
+            role: users[0].role,
+          });
 
           return users[0];
         } finally {
@@ -379,58 +386,22 @@ class AuthService {
       throw error;
     }
   }
-  // ========== UPDATE PROFILE (ADMIN) ==========
-  // async updateProfile(userId, tenantId, profileData, isSuperadmin = false) {
-  //   try {
-  //     const parsedUserId = parseInt(userId);
-  //     if (isNaN(parsedUserId)) {
-  //       throw new Error("Invalid user ID");
-  //     }
 
-  //     const updates = [];
-  //     const params = [];
-
-  //     if (profileData.name !== undefined) {
-  //       updates.push("name = ?");
-  //       params.push(profileData.name);
-  //     }
-  //     if (profileData.mobile !== undefined) {
-  //       updates.push("mobile = ?");
-  //       params.push(profileData.mobile);
-  //     }
-
-  //     if (updates.length === 0) return false;
-
-  //     updates.push("updated_at = NOW()");
-  //     params.push(parsedUserId);
-
-  //     if (isSuperadmin) {
-  //       await db.query(
-  //         `UPDATE superadmins SET ${updates.join(", ")} WHERE id = ?`,
-  //         params,
-  //       );
-  //     } else {
-  //       const tenantDb =
-  //         await DatabaseManager.getTenantDatabaseConnection(tenantId);
-  //       try {
-  //         await tenantDb.query(
-  //           `UPDATE users SET ${updates.join(", ")} WHERE id = ? AND deleted_at IS NULL`,
-  //           params,
-  //         );
-  //       } finally {
-  //         await tenantDb.end();
-  //       }
-  //     }
-
-  //     return true;
-  //   } catch (error) {
-  //     logger.error("Update profile error:", error);
-  //     throw error;
-  //   }
-  // }
-
- async updateProfile(userId, tenantId, profileData, isSuperadmin = false) {
+  async updateProfile(
+    userId,
+    tenantId,
+    profileData,
+    isSuperadmin = false,
+    profileImage = null,
+  ) {
     try {
+      console.log("=== UPDATE PROFILE SERVICE ===");
+      console.log("UserId:", userId);
+      console.log("TenantId:", tenantId);
+      console.log("IsSuperadmin:", isSuperadmin);
+      console.log("Profile data:", profileData);
+      console.log("Profile image provided:", !!profileImage);
+
       const parsedUserId = parseInt(userId);
       if (isNaN(parsedUserId)) {
         throw new Error("Invalid user ID");
@@ -439,68 +410,103 @@ class AuthService {
       const updates = [];
       const params = [];
 
-      // Basic profile fields (matches your users table columns)
-      if (profileData.name !== undefined) {
+      // Basic profile fields
+      if (
+        profileData.name !== undefined &&
+        profileData.name !== null &&
+        profileData.name !== ""
+      ) {
         updates.push("name = ?");
         params.push(profileData.name);
       }
-      
-      if (profileData.mobile !== undefined) {
+
+      if (
+        profileData.mobile !== undefined &&
+        profileData.mobile !== null &&
+        profileData.mobile !== ""
+      ) {
         updates.push("mobile = ?");
         params.push(profileData.mobile);
       }
-      
-      if (profileData.email !== undefined) {
+
+      if (
+        profileData.email !== undefined &&
+        profileData.email !== null &&
+        profileData.email !== ""
+      ) {
         updates.push("email = ?");
         params.push(profileData.email);
       }
-      
-      // Profile image (column name is profile_image in your table)
-      if (profileData.profile_image !== undefined) {
+
+      // Handle profile image upload
+      if (profileImage) {
         updates.push("profile_image = ?");
-        params.push(profileData.profile_image);
+        params.push(profileImage);
       }
 
       if (updates.length === 0) {
-        throw new Error("At least one field is required to update");
+        throw new Error("No fields to update");
       }
 
       updates.push("updated_at = NOW()");
       params.push(parsedUserId);
 
+      let success = false;
+
       if (isSuperadmin) {
-        const db = await DatabaseManager.getConnection();
+        // Update superadmin
+        const mainDb = await DatabaseManager.getConnection();
         try {
-          await db.query(
+          const result = await mainDb.query(
             `UPDATE superadmins SET ${updates.join(", ")} WHERE id = ?`,
             params,
           );
+          success = result.affectedRows > 0;
         } finally {
-          await db.end();
+          await mainDb.end();
         }
       } else {
+        // Update tenant user
         if (!tenantId) {
           throw new Error("Tenant ID is required");
         }
 
-        const tenantDb = await DatabaseManager.getTenantDatabaseConnection(tenantId);
+        const tenantDb =
+          await DatabaseManager.getTenantDatabaseConnection(tenantId);
 
         try {
-          await tenantDb.query(
+          const result = await tenantDb.query(
             `UPDATE users SET ${updates.join(", ")} WHERE id = ?`,
             params,
           );
+          success = result.affectedRows > 0;
+          console.log("Update result:", result);
         } finally {
           await tenantDb.end();
         }
       }
 
-      return true;
+      if (!success) {
+        throw new Error("Failed to update profile");
+      }
+
+      // Fetch and return updated profile
+      const updatedProfile = await this.getProfile(
+        userId,
+        tenantId,
+        isSuperadmin,
+      );
+
+      return {
+        success: true,
+        message: "Profile updated successfully",
+        data: updatedProfile,
+      };
     } catch (error) {
       logger.error("Update profile error:", error);
       throw error;
     }
-}
+  }
 
   // Generate OTP
   generateOTP() {
@@ -508,89 +514,292 @@ class AuthService {
   }
 
   // Request Password Reset (Send OTP)
+  // async requestPasswordReset(email, tenantSubdomain = null) {
+  //   try {
+  //     let user = null;
+  //     let tenantId = null;
+  //     let isSuperadmin = false;
+
+  //     // Check if superadmin
+  //     if (!tenantSubdomain) {
+  //       const users = await db.query(
+  //         'SELECT id, name, email FROM superadmins WHERE email = ? AND status = "active"',
+  //         [email],
+  //       );
+
+  //       if (users.length > 0) {
+  //         user = users[0];
+  //         isSuperadmin = true;
+  //       }
+  //     } else {
+  //       // Check in tenant database
+  //       const tenant = await db.query(
+  //         'SELECT id FROM tenants WHERE subdomain = ? AND status = "active"',
+  //         [tenantSubdomain],
+  //       );
+
+  //       if (tenant.length === 0) {
+  //         throw new Error("Tenant not found");
+  //       }
+
+  //       tenantId = tenant[0].id;
+  //       const tenantDb =
+  //         await DatabaseManager.getTenantDatabaseConnection(tenantId);
+
+  //       try {
+  //         const result = await tenantDb.query(
+  //           'SELECT id, name, email FROM users WHERE email = ? AND status = "active"',
+  //           [email],
+  //         );
+
+  //         const users = result[0];
+  //         if (users && users.length > 0) {
+  //           user = users[0];
+  //         }
+  //       } finally {
+  //         await tenantDb.end();
+  //       }
+  //     }
+
+  //     if (!user) {
+  //       // Don't reveal that email doesn't exist for security
+  //       return {
+  //         success: true,
+  //         message: "If the email exists, an OTP has been sent",
+  //       };
+  //     }
+
+  //     // Generate OTP and expiry
+  //     const otp = this.generateOTP();
+  //     const otpExpiry = new Date();
+  //     otpExpiry.setMinutes(otpExpiry.getMinutes() + 10); // 10 minutes expiry
+
+  //     // Store OTP in database (create password_resets table)
+  //     await db.query(
+  //       `INSERT INTO password_resets (email, otp, expires_at, is_superadmin, tenant_id)
+  //        VALUES (?, ?, ?, ?, ?)
+  //        ON DUPLICATE KEY UPDATE otp = ?, expires_at = ?, created_at = NOW()`,
+  //       [email, otp, otpExpiry, isSuperadmin, tenantId, otp, otpExpiry],
+  //     );
+
+  //     // Send OTP via email
+  //     await EmailService.sendOTP(email, otp, user.name);
+
+  //     return {
+  //       success: true,
+  //       message: "OTP sent to your email",
+  //       email: email,
+  //     };
+  //   } catch (error) {
+  //     logger.error("Request password reset error:", error);
+  //     throw error;
+  //   }
+  // }
+
+  // Request Password Reset (Send OTP) - WITH COMPLETE DEBUGGING
   async requestPasswordReset(email, tenantSubdomain = null) {
     try {
+      console.log("\n🔐 ===== PASSWORD RESET REQUEST =====");
+      console.log("📧 Email:", email);
+      console.log(
+        "🏢 Tenant Subdomain:",
+        tenantSubdomain || "None (Superadmin)",
+      );
+      console.log("⏰ Time:", new Date().toISOString());
+
       let user = null;
       let tenantId = null;
       let isSuperadmin = false;
 
       // Check if superadmin
       if (!tenantSubdomain) {
+        console.log("\n📌 Checking SUPERADMIN table...");
         const users = await db.query(
           'SELECT id, name, email FROM superadmins WHERE email = ? AND status = "active"',
           [email],
         );
 
+        console.log(`📊 Found ${users.length} superadmin(s)`);
+
         if (users.length > 0) {
           user = users[0];
           isSuperadmin = true;
+          console.log("✅ SUPERADMIN found:", {
+            id: user.id,
+            name: user.name,
+            email: user.email,
+          });
+        } else {
+          console.log("❌ No superadmin found with email:", email);
         }
       } else {
-        // Check in tenant database
-        const tenant = await db.query(
-          'SELECT id FROM tenants WHERE subdomain = ? AND status = "active"',
+        console.log("\n📌 Checking TENANT with subdomain:", tenantSubdomain);
+
+        // Get tenant info
+        const tenants = await db.query(
+          'SELECT id, name, subdomain, database_name, status FROM tenants WHERE subdomain = ? AND status = "active"',
           [tenantSubdomain],
         );
 
-        if (tenant.length === 0) {
-          throw new Error("Tenant not found");
+        console.log(`📊 Found ${tenants.length} tenant(s)`);
+
+        if (tenants.length === 0) {
+          console.log(
+            "❌ No active tenant found with subdomain:",
+            tenantSubdomain,
+          );
+
+          // Also check inactive tenants for debugging
+          const inactiveTenants = await db.query(
+            "SELECT id, name, subdomain, status FROM tenants WHERE subdomain = ?",
+            [tenantSubdomain],
+          );
+
+          if (inactiveTenants.length > 0) {
+            console.log(
+              `⚠️ Tenant exists but status is: ${inactiveTenants[0].status}`,
+            );
+          }
+
+          return {
+            success: true,
+            message: "If the email exists, an OTP has been sent",
+          };
         }
 
-        tenantId = tenant[0].id;
-        const tenantDb =
-          await DatabaseManager.getTenantDatabaseConnection(tenantId);
+        const tenant = tenants[0];
+        tenantId = tenant.id;
+        console.log("✅ Tenant found:", {
+          id: tenant.id,
+          name: tenant.name,
+          subdomain: tenant.subdomain,
+          database: tenant.database_name,
+          status: tenant.status,
+        });
+
+        // Get tenant database connection
+        console.log("🔌 Connecting to tenant database...");
+        let tenantDb = null;
 
         try {
+          tenantDb =
+            await DatabaseManager.getTenantDatabaseConnection(tenantId);
+          console.log("✅ Tenant database connected successfully");
+
+          // Query users table
+          console.log("🔍 Querying users table with email:", email);
           const result = await tenantDb.query(
-            'SELECT id, name, email FROM users WHERE email = ? AND status = "active"',
+            'SELECT id, name, email, status FROM users WHERE email = ? AND status = "active"',
             [email],
           );
 
-          const users = result[0];
+          // Handle mysql2 result format
+          const users = Array.isArray(result) && result[0] ? result[0] : result;
+          console.log(
+            `📊 Query result type: ${Array.isArray(result) ? "Array" : typeof result}`,
+          );
+          console.log(`📊 Users found: ${users?.length || 0}`);
+
           if (users && users.length > 0) {
             user = users[0];
+            console.log("✅ USER found in tenant database:", {
+              id: user.id,
+              name: user.name,
+              email: user.email,
+              status: user.status,
+            });
+          } else {
+            console.log("❌ No active user found with email:", email);
+
+            // Check if user exists but not active
+            const inactiveUserResult = await tenantDb.query(
+              "SELECT id, name, email, status FROM users WHERE email = ?",
+              [email],
+            );
+            const inactiveUsers =
+              Array.isArray(inactiveUserResult) && inactiveUserResult[0]
+                ? inactiveUserResult[0]
+                : inactiveUserResult;
+
+            if (inactiveUsers && inactiveUsers.length > 0) {
+              console.log(
+                `⚠️ User exists but status is: ${inactiveUsers[0].status}`,
+              );
+            }
           }
+        } catch (dbError) {
+          console.error("❌ Tenant database error:", dbError.message);
+          console.error("Stack:", dbError.stack);
         } finally {
-          await tenantDb.end();
+          if (tenantDb) {
+            await tenantDb.end();
+            console.log("🔌 Tenant database connection closed");
+          }
         }
       }
 
       if (!user) {
-        // Don't reveal that email doesn't exist for security
+        console.log("\n⚠️ No user found - returning security message");
         return {
           success: true,
           message: "If the email exists, an OTP has been sent",
         };
       }
 
+      console.log("\n✅ User validated! Proceeding with OTP generation...");
+
       // Generate OTP and expiry
       const otp = this.generateOTP();
       const otpExpiry = new Date();
-      otpExpiry.setMinutes(otpExpiry.getMinutes() + 10); // 10 minutes expiry
+      otpExpiry.setMinutes(otpExpiry.getMinutes() + 10);
 
-      // Store OTP in database (create password_resets table)
+      console.log(`🔑 Generated OTP: ${otp}`);
+      console.log(`⏰ OTP Expiry: ${otpExpiry.toISOString()}`);
+
+      // Store OTP in database
+      console.log("💾 Storing OTP in password_resets table...");
       await db.query(
         `INSERT INTO password_resets (email, otp, expires_at, is_superadmin, tenant_id)
-         VALUES (?, ?, ?, ?, ?)
-         ON DUPLICATE KEY UPDATE otp = ?, expires_at = ?, created_at = NOW()`,
-        [email, otp, otpExpiry, isSuperadmin, tenantId, otp, otpExpiry],
+       VALUES (?, ?, ?, ?, ?)
+       ON DUPLICATE KEY UPDATE 
+       otp = VALUES(otp), 
+       expires_at = VALUES(expires_at), 
+       created_at = NOW(),
+       is_used = 0`,
+        [email, otp, otpExpiry, isSuperadmin ? 1 : 0, tenantId],
       );
+      console.log("✅ OTP stored successfully");
 
       // Send OTP via email
-      await EmailService.sendOTP(email, otp, user.name);
+      console.log(`📧 Attempting to send OTP email to: ${email}`);
+      try {
+        await EmailService.sendOTP(email, otp, user.name);
+        console.log("✅ Email sent successfully!");
+      } catch (emailError) {
+        console.error("❌ Email sending failed:", emailError.message);
+        // For development, log OTP to console
+        if (process.env.NODE_ENV === "development") {
+          console.log("\n⚠️⚠️⚠️ DEVELOPMENT MODE - NO EMAIL SENT ⚠️⚠️⚠️");
+          console.log(`📧 Email: ${email}`);
+          console.log(`🔑 OTP CODE: ${otp}`);
+          console.log(`👤 User: ${user.name}`);
+          console.log("⚠️⚠️⚠️ PLEASE USE THIS OTP FOR TESTING ⚠️⚠️⚠️\n");
+        }
+      }
 
+      console.log("\n✅ Password reset request completed successfully");
       return {
         success: true,
         message: "OTP sent to your email",
         email: email,
       };
     } catch (error) {
+      console.error("\n❌ Request password reset error:", error);
       logger.error("Request password reset error:", error);
       throw error;
     }
   }
 
-  // Verify OTP
   // Verify OTP
   async verifyOTP(email, otp) {
     try {
@@ -603,13 +812,14 @@ class AuthService {
       }
 
       // Get OTP from database
-      const [resetRequest] = await db.query(
+      const resetRequests = await db.query(
         `SELECT * FROM password_resets 
          WHERE email = ? AND otp = ? AND is_used = 0
          ORDER BY created_at DESC LIMIT 1`,
         [email, otp],
       );
 
+      const resetRequest = resetRequests[0];
       console.log("Found OTP record:", resetRequest ? "Yes" : "No");
 
       if (!resetRequest) {
@@ -646,7 +856,7 @@ class AuthService {
   async resetPasswordWithOTP(email, otp, newPassword, tenantSubdomain = null) {
     try {
       // Verify OTP first
-      const verification = await this.verifyOTP(email, otp, tenantSubdomain);
+      const verification = await this.verifyOTP(email, otp);
 
       if (!verification.success) {
         throw new Error("Invalid or expired OTP");
@@ -702,37 +912,25 @@ class AuthService {
         }
       }
 
-      // Mark OTP as used
-      await db.query(
-        "UPDATE password_resets SET is_used = TRUE WHERE email = ? AND otp = ?",
-        [email, otp],
-      );
-
       // Get user name for email
       let userName = "";
       if (verification.is_superadmin) {
-        const [user] = await db.query(
+        const users = await db.query(
           "SELECT name FROM superadmins WHERE email = ?",
           [email],
         );
-        userName = user?.name || "User";
+        userName = users[0]?.name || "User";
       } else {
-        const tenantId =
-          verification.tenant_id ||
-          (
-            await db.query("SELECT id FROM tenants WHERE subdomain = ?", [
-              tenantSubdomain,
-            ])
-          )[0]?.id;
+        const tenantId = verification.tenant_id;
         if (tenantId) {
           const tenantDb =
             await DatabaseManager.getTenantDatabaseConnection(tenantId);
           try {
-            const [user] = await tenantDb.query(
+            const users = await tenantDb.query(
               "SELECT name FROM users WHERE email = ?",
               [email],
             );
-            userName = user?.name || "User";
+            userName = users[0]?.name || "User";
           } finally {
             await tenantDb.end();
           }

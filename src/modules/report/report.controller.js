@@ -5,10 +5,33 @@ const DatabaseManager = require("../../services/database-manager.service");
 class ReportController {
   async getSalesReport(req, res) {
     try {
-      const fromDate = req.query.fromDate || moment().startOf("month").format("YYYY-MM-DD");
+      const fromDate =
+        req.query.fromDate || moment().startOf("month").format("YYYY-MM-DD");
       const toDate = req.query.toDate || moment().format("YYYY-MM-DD");
+      const format = req.query.format; // Get the format parameter
 
-      const report = await ReportService.getSalesReport(req.tenantId, fromDate, toDate);
+      console.log(
+        `Sales report request - Format: ${format || "json"}, From: ${fromDate}, To: ${toDate}`,
+      );
+
+      // If format is specified, export instead of returning JSON
+      if (format && ["pdf", "csv", "xlsx"].includes(format.toLowerCase())) {
+        // Set the query parameters for the export function
+        req.query.fromDate = fromDate;
+        req.query.toDate = toDate;
+        req.query.format = format.toLowerCase();
+
+        // Call the export function
+        return await this.exportSalesReport(req, res);
+      }
+
+      // Otherwise, return JSON data (existing functionality)
+      const report = await ReportService.getSalesReport(
+        req.tenantId,
+        fromDate,
+        toDate,
+      );
+
       res.json({
         success: true,
         data: report,
@@ -44,10 +67,15 @@ class ReportController {
 
   async getFinancialReport(req, res) {
     try {
-      const fromDate = req.query.fromDate || moment().startOf("year").format("YYYY-MM-DD");
+      const fromDate =
+        req.query.fromDate || moment().startOf("year").format("YYYY-MM-DD");
       const toDate = req.query.toDate || moment().format("YYYY-MM-DD");
 
-      const report = await ReportService.getFinancialReport(req.tenantId, fromDate, toDate);
+      const report = await ReportService.getFinancialReport(
+        req.tenantId,
+        fromDate,
+        toDate,
+      );
       res.json({
         success: true,
         data: report,
@@ -72,14 +100,15 @@ class ReportController {
         });
       }
 
-      const fromDate = req.query.fromDate || moment().startOf("year").format("YYYY-MM-DD");
+      const fromDate =
+        req.query.fromDate || moment().startOf("year").format("YYYY-MM-DD");
       const toDate = req.query.toDate || moment().format("YYYY-MM-DD");
 
       const report = await ReportService.getCustomerReport(
         req.tenantId,
         req.params.customerId,
         fromDate,
-        toDate
+        toDate,
       );
       return res.json({
         success: true,
@@ -114,52 +143,105 @@ class ReportController {
     }
   }
 
-  // Export Sales Report
+  // Export Sales Report (FIXED - using Buffer approach)
   async exportSalesReport(req, res) {
     try {
-      const fromDate = req.query.fromDate || moment().startOf("month").format("YYYY-MM-DD");
+      const fromDate =
+        req.query.fromDate || moment().startOf("month").format("YYYY-MM-DD");
       const toDate = req.query.toDate || moment().format("YYYY-MM-DD");
       const format = req.query.format || "pdf";
 
+      console.log(
+        `Exporting sales report in ${format} format from ${fromDate} to ${toDate}`,
+      );
+
       if (format === "pdf") {
-        const doc = await ReportService.exportSalesReportPDF(req.tenantId, fromDate, toDate);
-        
+        const pdfBuffer = await ReportService.exportSalesReportPDF(
+          req.tenantId,
+          fromDate,
+          toDate,
+        );
+
         res.setHeader("Content-Type", "application/pdf");
-        res.setHeader("Content-Disposition", `attachment; filename=sales_report_${Date.now()}.pdf`);
-        
-        doc.pipe(res);
-        doc.end();
+        res.setHeader(
+          "Content-Disposition",
+          `attachment; filename=sales_report_${Date.now()}.pdf`,
+        );
+        res.setHeader("Content-Length", pdfBuffer.length);
+
+        res.send(pdfBuffer);
+      } else if (format === "csv") {
+        const csv = await ReportService.exportSalesReportCSV(
+          req.tenantId,
+          fromDate,
+          toDate,
+        );
+
+        res.setHeader("Content-Type", "text/csv");
+        res.setHeader(
+          "Content-Disposition",
+          `attachment; filename=sales_report_${Date.now()}.csv`,
+        );
+        res.send(csv);
+      } else if (format === "xlsx") {
+        const workbook = await ReportService.exportSalesReportXLSX(
+          req.tenantId,
+          fromDate,
+          toDate,
+        );
+
+        res.setHeader(
+          "Content-Type",
+          "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        );
+        res.setHeader(
+          "Content-Disposition",
+          `attachment; filename=sales_report_${Date.now()}.xlsx`,
+        );
+
+        await workbook.xlsx.write(res);
+        res.end();
       } else {
         res.status(400).json({
           success: false,
-          message: "Invalid format. Only PDF is supported",
+          message: "Invalid format. Supported formats: pdf, csv, xlsx",
         });
       }
     } catch (error) {
       console.error("Export sales report error:", error);
-      res.status(500).json({
-        success: false,
-        message: "Error exporting sales report",
-        error: error.message,
-      });
+      if (!res.headersSent) {
+        res.status(500).json({
+          success: false,
+          message: "Error exporting sales report",
+          error: error.message,
+        });
+      }
     }
   }
 
   // Export Expenses Report
   async exportExpensesReport(req, res) {
     try {
-      const fromDate = req.query.fromDate || moment().startOf("month").format("YYYY-MM-DD");
+      const fromDate =
+        req.query.fromDate || moment().startOf("month").format("YYYY-MM-DD");
       const toDate = req.query.toDate || moment().format("YYYY-MM-DD");
       const format = req.query.format || "pdf";
 
       if (format === "pdf") {
-        const doc = await ReportService.exportExpensesReportPDF(req.tenantId, fromDate, toDate);
-        
+        const pdfBuffer = await ReportService.exportExpensesReportPDF(
+          req.tenantId,
+          fromDate,
+          toDate,
+        );
+
         res.setHeader("Content-Type", "application/pdf");
-        res.setHeader("Content-Disposition", `attachment; filename=expenses_report_${Date.now()}.pdf`);
-        
-        doc.pipe(res);
-        doc.end();
+        res.setHeader(
+          "Content-Disposition",
+          `attachment; filename=expenses_report_${Date.now()}.pdf`,
+        );
+        res.setHeader("Content-Length", pdfBuffer.length);
+
+        res.send(pdfBuffer);
       } else {
         res.status(400).json({
           success: false,
@@ -168,29 +250,39 @@ class ReportController {
       }
     } catch (error) {
       console.error("Export expenses report error:", error);
-      res.status(500).json({
-        success: false,
-        message: "Error exporting expenses report",
-        error: error.message,
-      });
+      if (!res.headersSent) {
+        res.status(500).json({
+          success: false,
+          message: "Error exporting expenses report",
+          error: error.message,
+        });
+      }
     }
   }
 
   // Export Financial Report
   async exportFinancialReport(req, res) {
     try {
-      const fromDate = req.query.fromDate || moment().startOf("year").format("YYYY-MM-DD");
+      const fromDate =
+        req.query.fromDate || moment().startOf("year").format("YYYY-MM-DD");
       const toDate = req.query.toDate || moment().format("YYYY-MM-DD");
       const format = req.query.format || "pdf";
 
       if (format === "pdf") {
-        const doc = await ReportService.exportFinancialReportPDF(req.tenantId, fromDate, toDate);
-        
+        const pdfBuffer = await ReportService.exportFinancialReportPDF(
+          req.tenantId,
+          fromDate,
+          toDate,
+        );
+
         res.setHeader("Content-Type", "application/pdf");
-        res.setHeader("Content-Disposition", `attachment; filename=financial_report_${Date.now()}.pdf`);
-        
-        doc.pipe(res);
-        doc.end();
+        res.setHeader(
+          "Content-Disposition",
+          `attachment; filename=financial_report_${Date.now()}.pdf`,
+        );
+        res.setHeader("Content-Length", pdfBuffer.length);
+
+        res.send(pdfBuffer);
       } else {
         res.status(400).json({
           success: false,
@@ -199,19 +291,19 @@ class ReportController {
       }
     } catch (error) {
       console.error("Export financial report error:", error);
-      res.status(500).json({
-        success: false,
-        message: "Error exporting financial report",
-        error: error.message,
-      });
+      if (!res.headersSent) {
+        res.status(500).json({
+          success: false,
+          message: "Error exporting financial report",
+          error: error.message,
+        });
+      }
     }
   }
 
   // Export Customer Report
   async exportCustomerReport(req, res) {
     try {
-      console.log("=== Export Customer Report Called ===");
-      
       if (!req.params.customerId) {
         return res.status(400).json({
           success: false,
@@ -219,74 +311,54 @@ class ReportController {
         });
       }
 
-      const fromDate = req.query.fromDate || moment().startOf("year").format("YYYY-MM-DD");
+      const fromDate =
+        req.query.fromDate || moment().startOf("year").format("YYYY-MM-DD");
       const toDate = req.query.toDate || moment().format("YYYY-MM-DD");
       const format = req.query.format || "pdf";
 
       // First check if customer exists
-      const customerData = await ReportService.getCustomerReport(
+      const customerCheck = await ReportService.getCustomerReport(
         req.tenantId,
         req.params.customerId,
         fromDate,
-        toDate
+        toDate,
       );
 
-      if (!customerData.customer || Object.keys(customerData.customer).length === 0) {
+      if (!customerCheck.customer) {
         return res.status(404).json({
           success: false,
-          message: "Customer not found",
+          message: `Customer not found with ID: ${req.params.customerId}`,
         });
       }
 
-      const customer = customerData.customer;
-
       if (format === "pdf") {
-        const doc = await ReportService.exportCustomerReportPDF(
+        const pdfBuffer = await ReportService.exportCustomerReportPDF(
           req.tenantId,
           req.params.customerId,
           fromDate,
-          toDate
+          toDate,
         );
 
         res.setHeader("Content-Type", "application/pdf");
         res.setHeader(
           "Content-Disposition",
-          `attachment; filename=customer_report_${customer.name || "customer"}_${Date.now()}.pdf`
+          `attachment; filename=customer_report_${customerCheck.customer.name || "customer"}_${Date.now()}.pdf`,
         );
+        res.setHeader("Content-Length", pdfBuffer.length);
 
-        doc.pipe(res);
-        doc.end();
+        res.send(pdfBuffer);
       } else if (format === "csv") {
-        let csv = "Customer Report\n\n";
-        csv += `Customer Name,${customer.name || "N/A"}\n`;
-        csv += `Email,${customer.email || "N/A"}\n`;
-        csv += `Mobile,${customer.mobile || "N/A"}\n`;
-        csv += `Address,${customer.address || "N/A"}\n`;
-        csv += `GST Number,${customer.gst_number || "N/A"}\n`;
-        csv += `Period,${fromDate} to ${toDate}\n\n`;
-
-        csv += `Summary\n`;
-        csv += `Total Invoices,${customerData.summary.total_invoices}\n`;
-        csv += `Total Purchases,${customerData.summary.total_purchases}\n`;
-        csv += `Total GST,${customerData.summary.total_gst}\n`;
-        csv += `Outstanding Amount,${customerData.summary.outstanding_amount}\n\n`;
-
-        csv += `Invoice Details\n`;
-        csv += `Invoice No,Date,Amount,GST,Status,Balance\n`;
-
-        customerData.invoices.forEach((inv) => {
-          csv += `${inv.invoice_no},`;
-          csv += `${new Date(inv.invoice_date).toLocaleDateString("en-IN")},`;
-          csv += `${inv.total_amount},`;
-          csv += `${inv.gst_amount},`;
-          csv += `${inv.payment_status},`;
-          csv += `${inv.balance_amount}\n`;
-        });
+        const csv = await ReportService.exportCustomerReportCSV(
+          req.tenantId,
+          req.params.customerId,
+          fromDate,
+          toDate,
+        );
 
         res.setHeader("Content-Type", "text/csv");
         res.setHeader(
           "Content-Disposition",
-          `attachment; filename=customer_report_${customer.name || "customer"}_${Date.now()}.csv`
+          `attachment; filename=customer_report_${customerCheck.customer.name || "customer"}_${Date.now()}.csv`,
         );
         res.send(csv);
       } else {
